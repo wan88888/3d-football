@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { InputManager } from './InputManager.js';
+import { LoadingManager } from './LoadingManager.js';
 import { Player } from '../entities/Player.js';
 import { Ball } from '../entities/Ball.js';
 import { Obstacle } from '../entities/Obstacle.js';
 import { ParticleSystem } from '../effects/ParticleSystem.js';
 import { AudioManager } from '../audio/AudioManager.js';
+import { FPSCounter } from '../utils/FPSCounter.js';
+import { LEVELS, PHYSICS, GOAL, FIELD, GAME } from '../config/constants.js';
+import { env } from '../config/env.js';
 
 export class Game {
     constructor() {
@@ -31,13 +35,16 @@ export class Game {
 
         // Physics setup
         this.world = new CANNON.World({
-            gravity: new CANNON.Vec3(0, -9.82, 0), // m/s²
+            gravity: new CANNON.Vec3(0, PHYSICS.GRAVITY, 0),
         });
+
+        // Loading Manager (initialize first)
+        this.loadingManager = new LoadingManager();
 
         // Managers
         this.inputManager = new InputManager();
         this.particleSystem = new ParticleSystem(this.scene);
-        this.audioManager = new AudioManager();
+        this.audioManager = new AudioManager(this.loadingManager);
 
         // Lighting
         this.setupLights();
@@ -54,14 +61,9 @@ export class Game {
         this.isPaused = false;
 
         // Level Config
-        this.levels = [
-            { time: 30, target: 3 },  // Level 1
-            { time: 45, target: 6 },  // Level 2
-            { time: 60, target: 10 }, // Level 3
-            { time: 60, target: 12 }, // Level 4
-            { time: 50, target: 15 }  // Level 5
-        ];
+        this.levels = LEVELS;
         this.currentLevelIndex = 0;
+        this.targetScore = 0;
         this.timeRemaining = 0;
 
         // UI Elements
@@ -110,8 +112,10 @@ export class Game {
         // Handle resize
         window.addEventListener('resize', () => this.onWindowResize(), false);
 
-        // Start loop
+        // Performance
         this.lastTime = performance.now();
+        this.frameTime = 1000 / env.MAX_FPS; // Target frame time
+        this.fpsCounter = env.SHOW_FPS ? new FPSCounter() : null;
         this.animate();
     }
 
@@ -165,8 +169,8 @@ export class Game {
         const ballMaterial = this.ball.body.material;
         const playerMaterial = this.player.body.material;
         const ballPlayerContact = new CANNON.ContactMaterial(ballMaterial, playerMaterial, {
-            friction: 0.1,        // Low friction so ball slides off
-            restitution: 0.7     // High bounce so ball bounces off player
+            friction: PHYSICS.BALL_PLAYER_FRICTION,
+            restitution: PHYSICS.BALL_PLAYER_RESTITUTION
         });
         this.world.addContactMaterial(ballPlayerContact);
 
@@ -213,7 +217,7 @@ export class Game {
         console.log("Level Complete!");
         setTimeout(() => {
             this.startLevel(this.currentLevelIndex + 1);
-        }, 1000);
+        }, GAME.LEVEL_COMPLETE_DELAY);
     }
 
     levelFailed() {
@@ -433,7 +437,18 @@ export class Game {
 
         const time = performance.now();
         const dt = (time - this.lastTime) / 1000;
+
+        // Frame rate limiting
+        if (dt < this.frameTime / 1000) {
+            return; // Skip this frame
+        }
+
         this.lastTime = time;
+
+        // Update FPS counter
+        if (this.fpsCounter) {
+            this.fpsCounter.update();
+        }
 
         // Only update game logic if playing
         if (this.isPlaying && !this.isGameOver && !this.isPaused) {
@@ -477,8 +492,14 @@ export class Game {
         if (this.isGoalResetting || !this.ball) return;
 
         const pos = this.ball.body.position;
-        // Goal is at Z = -15, Width 10 (-5 to 5), Height 3, Depth 3
-        if (pos.z < -15 && pos.z > -18 && pos.x > -5 && pos.x < 5 && pos.y < 3) {
+        // Goal is at Z = GOAL.POSITION_Z, Width GOAL.WIDTH/2, Height GOAL.HEIGHT, Depth GOAL.DEPTH
+        const goalLeft = -GOAL.WIDTH / 2;
+        const goalRight = GOAL.WIDTH / 2;
+        const goalBack = GOAL.POSITION_Z - GOAL.DEPTH;
+
+        if (pos.z < GOAL.POSITION_Z && pos.z > goalBack &&
+            pos.x > goalLeft && pos.x < goalRight &&
+            pos.y < GOAL.HEIGHT) {
             console.log("GOAL!");
             this.score++;
             this.uiScore.innerText = this.score;
@@ -492,14 +513,15 @@ export class Game {
             if (this.score >= this.targetScore) {
                 this.levelComplete();
             } else {
-                setTimeout(() => this.resetBall(), 1000);
+                setTimeout(() => this.resetBall(), GAME.GOAL_RESET_DELAY);
             }
         }
 
         // Check if ball went out of bounds (missed shot or backward kick)
-        if (pos.z < -20 || pos.z > 15 || pos.x < -25 || pos.x > 25) {
+        if (pos.z < FIELD.FORWARD_BOUNDARY || pos.z > FIELD.BACKWARD_BOUNDARY ||
+            pos.x < FIELD.LEFT_BOUNDARY || pos.x > FIELD.RIGHT_BOUNDARY) {
             this.isGoalResetting = true;
-            setTimeout(() => this.resetBall(), 1000);
+            setTimeout(() => this.resetBall(), GAME.GOAL_RESET_DELAY);
         }
     }
 

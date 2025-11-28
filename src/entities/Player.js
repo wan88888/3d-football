@@ -1,12 +1,13 @@
 import * as THREE from 'three';
 import * as CANNON from 'cannon-es';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { PLAYER, GAME } from '../config/constants.js';
 
 export class Player {
     constructor(game, position = { x: 0, y: 2, z: 5 }) {
         this.game = game;
-        this.speed = 50; // 增加基础移动速度
-        this.runSpeed = 100; // 增加冲刺速度（按住Shift）
+        this.speed = PLAYER.SPEED;
+        this.runSpeed = PLAYER.RUN_SPEED;
 
         // Visual Mesh - will be loaded from GLTF
         this.mesh = new THREE.Group();
@@ -18,13 +19,13 @@ export class Player {
         this.loadModel();
 
         // Physics Body - Larger size for better visibility
-        const shape = new CANNON.Cylinder(0.8, 0.8, 3.5, 8);
+        const shape = new CANNON.Cylinder(PLAYER.RADIUS, PLAYER.RADIUS, PLAYER.HEIGHT, 8);
 
         // Create physics material for the player
         const playerMaterial = new CANNON.Material('player');
 
         this.body = new CANNON.Body({
-            mass: 70, // kg
+            mass: PLAYER.MASS, // kg
             shape: shape,
             position: new CANNON.Vec3(position.x, position.y, position.z),
             fixedRotation: true, // Prevent tipping over
@@ -40,7 +41,7 @@ export class Player {
 
         // Shooting
         this.charge = 0;
-        this.maxCharge = 100;
+        this.maxCharge = GAME.MAX_CHARGE;
         this.isCharging = false;
         this.chargeBar = document.getElementById('charge-bar');
         // Animation
@@ -52,6 +53,12 @@ export class Player {
 
     loadModel() {
         const loader = new GLTFLoader();
+
+        // Register with loading manager if available
+        if (this.game.loadingManager) {
+            this.game.loadingManager.registerAsset();
+        }
+
         loader.load(
             '/assets/naruto_model/f631a1cffe4642b981a31a3b12946ec3.gltf',
             (gltf) => {
@@ -74,16 +81,28 @@ export class Player {
                 this.mesh.add(model);
                 console.log('Naruto model loaded successfully');
 
+                // Notify loading manager
+                if (this.game.loadingManager) {
+                    this.game.loadingManager.assetLoaded('Player Model');
+                }
+
                 // Setup Animations
                 this.mixer = new THREE.AnimationMixer(model);
                 this.setupAnimations(gltf.animations);
             },
             (progress) => {
                 // Loading progress
-                console.log('Loading model...', (progress.loaded / progress.total * 100).toFixed(2) + '%');
+                const percent = (progress.loaded / progress.total * 100).toFixed(2);
+                console.log('Loading player model...', percent + '%');
             },
             (error) => {
                 console.error('Error loading Naruto model:', error);
+
+                // Notify loading manager of error
+                if (this.game.loadingManager) {
+                    this.game.loadingManager.assetError('Player Model', error);
+                }
+
                 // Fallback: create simple humanoid if model fails to load
                 this.createFallbackMesh();
             }
@@ -214,6 +233,9 @@ export class Player {
         if (input.space) {
             this.isCharging = true;
             this.charge += dt * 100; // Charge up speed
+            if (this.charge < GAME.MAX_CHARGE) {
+                this.charge += GAME.CHARGE_SPEED * dt;
+            }
             if (this.charge > this.maxCharge) this.charge = this.maxCharge;
         } else {
             if (this.isCharging) {
@@ -248,7 +270,7 @@ export class Player {
 
         // Check movement
         const speed = this.body.velocity.length();
-        if (speed > 1.0) {
+        if (speed > PLAYER.MIN_MOVEMENT_SPEED) {
             this.fadeToAction('Run');
         } else {
             this.fadeToAction('Idle');
@@ -266,7 +288,7 @@ export class Player {
         const ballBody = this.game.ball.body;
         const dist = this.body.position.distanceTo(ballBody.position);
 
-        if (dist < 5.0) { // Kick distance
+        if (dist < PLAYER.KICK_DISTANCE) { // Kick distance
             // Calculate direction
             const direction = new CANNON.Vec3();
 
@@ -274,7 +296,7 @@ export class Player {
             const playerVel = this.body.velocity;
             const speed = Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z);
 
-            if (speed > 1.0) {
+            if (speed > PLAYER.MIN_MOVEMENT_SPEED) {
                 // Use movement direction
                 direction.set(playerVel.x, 0, playerVel.z);
             } else {
@@ -285,12 +307,12 @@ export class Player {
 
             direction.normalize();
 
-            // Add some lift
-            direction.y = 0.2;
+            // Lift ball slightly
+            direction.y = PHYSICS.BALL_LIFT_FACTOR;
             direction.normalize();
 
             // Force magnitude based on charge
-            const force = 5 + (this.charge / 100) * 20; // Min 5, Max 25 impulse
+            const force = BALL.MIN_SHOT_FORCE + (this.charge / GAME.MAX_CHARGE) * (BALL.MAX_SHOT_FORCE - BALL.MIN_SHOT_FORCE);
 
             // Apply impulse
             const impulse = direction.scale(force);

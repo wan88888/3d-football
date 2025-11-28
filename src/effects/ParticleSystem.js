@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PARTICLES } from '../config/constants.js';
 
 export class ParticleSystem {
     constructor(scene) {
@@ -8,7 +9,7 @@ export class ParticleSystem {
 
     createVictoryParticles(position = { x: 0, y: 5, z: 0 }) {
         // Create golden/colorful firework particles
-        const particleCount = 200;
+        const particleCount = PARTICLES.VICTORY_COUNT;
         const geometry = new THREE.BufferGeometry();
         const positions = [];
         const colors = [];
@@ -47,7 +48,7 @@ export class ParticleSystem {
         geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
         const material = new THREE.PointsMaterial({
-            size: 0.3,
+            size: PARTICLES.VICTORY_SIZE,
             vertexColors: true,
             transparent: true,
             opacity: 1.0,
@@ -60,7 +61,7 @@ export class ParticleSystem {
         this.particles.push({
             system: particleSystem,
             velocities: velocities,
-            lifetime: 3.0, // 3 seconds
+            lifetime: PARTICLES.VICTORY_LIFETIME,
             age: 0
         });
 
@@ -69,7 +70,7 @@ export class ParticleSystem {
 
     createDefeatParticles(position = { x: 0, y: 10, z: 0 }) {
         // Create gray/blue rain particles falling down
-        const particleCount = 150;
+        const particleCount = PARTICLES.DEFEAT_COUNT;
         const geometry = new THREE.BufferGeometry();
         const positions = [];
         const colors = [];
@@ -105,7 +106,7 @@ export class ParticleSystem {
         geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
 
         const material = new THREE.PointsMaterial({
-            size: 0.2,
+            size: PARTICLES.DEFEAT_SIZE,
             vertexColors: true,
             transparent: true,
             opacity: 0.8
@@ -117,7 +118,7 @@ export class ParticleSystem {
         this.particles.push({
             system: particleSystem,
             velocities: velocities,
-            lifetime: 4.0, // 4 seconds
+            lifetime: PARTICLES.DEFEAT_LIFETIME,
             age: 0
         });
 

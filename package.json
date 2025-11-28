@@ -1,15 +1,21 @@
 {
   "name": "3d-football",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "eslint src --ext .js",
+    "lint:fix": "eslint src --ext .js --fix",
+    "format": "prettier --write \"src/**/*.js\" \"*.{js,json,md}\"",
+    "format:check": "prettier --check \"src/**/*.js\" \"*.{js,json,md}\""
   },
   "devDependencies": {
-    "vite": "^7.2.4"
+    "vite": "^7.2.4",
+    "eslint": "^8.57.0",
+    "prettier": "^3.2.5"
   },
   "dependencies": {
     "cannon-es": "^0.20.0",
