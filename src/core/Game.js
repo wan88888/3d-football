@@ -4,6 +4,8 @@ import { InputManager } from './InputManager.js';
 import { Player } from '../entities/Player.js';
 import { Ball } from '../entities/Ball.js';
 import { Obstacle } from '../entities/Obstacle.js';
+import { ParticleSystem } from '../effects/ParticleSystem.js';
+import { AudioManager } from '../audio/AudioManager.js';
 
 export class Game {
     constructor() {
@@ -34,6 +36,8 @@ export class Game {
 
         // Managers
         this.inputManager = new InputManager();
+        this.particleSystem = new ParticleSystem(this.scene);
+        this.audioManager = new AudioManager();
 
         // Lighting
         this.setupLights();
@@ -47,6 +51,7 @@ export class Game {
         this.isGoalResetting = false;
         this.isGameOver = false;
         this.isPlaying = false;
+        this.isPaused = false;
 
         // Level Config
         this.levels = [
@@ -68,19 +73,39 @@ export class Game {
         this.uiTitle = document.getElementById('game-over-title');
         this.uiMsg = document.getElementById('game-over-msg');
         this.btnRestart = document.getElementById('btn-restart');
+        this.btnPause = document.getElementById('btn-pause');
+        this.uiPauseMenu = document.getElementById('pause-container');
+        this.btnResume = document.getElementById('btn-resume');
+        this.btnRestartPause = document.getElementById('btn-restart-pause');
 
         // UI Listeners
         this.btnRestart.addEventListener('click', () => this.handleRestart());
+        this.btnPause.addEventListener('click', () => this.togglePause());
+        this.btnResume.addEventListener('click', () => this.togglePause());
+        this.btnRestartPause.addEventListener('click', () => {
+            this.togglePause();
+            this.handleRestart();
+        });
 
-        // Keyboard shortcut for restart (Enter or R key)
+        // Keyboard shortcut for restart (Enter or R key) and Pause (Esc)
         window.addEventListener('keydown', (e) => {
             if (this.isGameOver && (e.key === 'Enter' || e.key === 'r' || e.key === 'R')) {
                 this.handleRestart();
+            }
+            if (e.key === 'Escape') {
+                this.togglePause();
             }
         });
 
         // Start Game
         this.startLevel(0);
+
+        // Start background music on first user interaction
+        window.addEventListener('click', () => {
+            if (this.audioManager) {
+                this.audioManager.playBGM();
+            }
+        }, { once: true });
 
         // Handle resize
         window.addEventListener('resize', () => this.onWindowResize(), false);
@@ -136,6 +161,15 @@ export class Game {
 
         this.entities.push(this.player, this.ball);
 
+        // Setup contact material between ball and player for better physics
+        const ballMaterial = this.ball.body.material;
+        const playerMaterial = this.player.body.material;
+        const ballPlayerContact = new CANNON.ContactMaterial(ballMaterial, playerMaterial, {
+            friction: 0.1,        // Low friction so ball slides off
+            restitution: 0.7     // High bounce so ball bounces off player
+        });
+        this.world.addContactMaterial(ballPlayerContact);
+
         // Add some obstacles for difficulty increase in later levels?
         // For now, keep it simple as requested: just time and score.
         // Maybe add obstacles from Level 3 onwards?
@@ -159,6 +193,20 @@ export class Game {
 
     levelComplete() {
         this.isPlaying = false;
+        // Play victory animation
+        if (this.player && this.player.playVictory) {
+            this.player.playVictory();
+        }
+        // Trigger victory particles
+        if (this.particleSystem) {
+            this.particleSystem.createVictoryParticles({ x: 0, y: 5, z: -10 });
+        }
+        // Play victory sound
+        if (this.audioManager) {
+            this.audioManager.playSFX('victory');
+        }
+        // Update button text
+        this.btnRestart.innerText = "Next Level";
         // Auto advance after short delay or show success screen?
         // Let's just go to next level immediately for flow, or show a quick message.
         // For now, immediate transition after 1s.
@@ -171,6 +219,18 @@ export class Game {
     levelFailed() {
         this.isPlaying = false;
         this.isGameOver = true;
+        // Play defeat animation
+        if (this.player && this.player.playDefeat) {
+            this.player.playDefeat();
+        }
+        // Trigger defeat particles
+        if (this.particleSystem) {
+            this.particleSystem.createDefeatParticles({ x: 0, y: 10, z: 0 });
+        }
+        // Play defeat sound
+        if (this.audioManager) {
+            this.audioManager.playSFX('defeat');
+        }
         this.uiTitle.innerText = "LEVEL FAILED";
         this.uiMsg.innerText = "Time's Up!";
         this.btnRestart.innerText = "Retry Level";
@@ -376,7 +436,7 @@ export class Game {
         this.lastTime = time;
 
         // Only update game logic if playing
-        if (this.isPlaying && !this.isGameOver) {
+        if (this.isPlaying && !this.isGameOver && !this.isPaused) {
             // Update Timer
             this.timeRemaining -= dt;
             if (this.timeRemaining <= 0) {
@@ -392,6 +452,11 @@ export class Game {
             this.entities.forEach(entity => {
                 if (entity.update) entity.update(dt);
             });
+
+            // Update particle system
+            if (this.particleSystem) {
+                this.particleSystem.update(dt);
+            }
 
             // Check Goal
             this.checkGoal();
@@ -412,12 +477,17 @@ export class Game {
         if (this.isGoalResetting || !this.ball) return;
 
         const pos = this.ball.body.position;
-        // Goal is at Z = -15, Width 10 (-5 to 5), Height 3
-        if (pos.z < -15 && pos.z > -16 && pos.x > -5 && pos.x < 5 && pos.y < 3) {
+        // Goal is at Z = -15, Width 10 (-5 to 5), Height 3, Depth 3
+        if (pos.z < -15 && pos.z > -18 && pos.x > -5 && pos.x < 5 && pos.y < 3) {
             console.log("GOAL!");
             this.score++;
             this.uiScore.innerText = this.score;
             this.isGoalResetting = true;
+
+            // Play goal sound
+            if (this.audioManager) {
+                this.audioManager.playSFX('goal');
+            }
 
             if (this.score >= this.targetScore) {
                 this.levelComplete();
@@ -426,8 +496,8 @@ export class Game {
             }
         }
 
-        // Check if ball went out of bounds (missed shot)
-        if (pos.z < -20 || pos.x < -25 || pos.x > 25) {
+        // Check if ball went out of bounds (missed shot or backward kick)
+        if (pos.z < -20 || pos.z > 15 || pos.x < -25 || pos.x > 25) {
             this.isGoalResetting = true;
             setTimeout(() => this.resetBall(), 1000);
         }
@@ -440,5 +510,21 @@ export class Game {
         this.ball.body.velocity.set(0, 0, 0);
         this.ball.body.angularVelocity.set(0, 0, 0);
         this.isGoalResetting = false;
+    }
+
+    togglePause() {
+        if (!this.isPlaying || this.isGameOver) return;
+
+        this.isPaused = !this.isPaused;
+
+        if (this.isPaused) {
+            this.uiPauseMenu.style.display = 'flex';
+            this.btnPause.style.display = 'none';
+        } else {
+            this.uiPauseMenu.style.display = 'none';
+            this.btnPause.style.display = 'flex';
+            // Reset lastTime to prevent huge dt jump
+            this.lastTime = performance.now();
+        }
     }
 }

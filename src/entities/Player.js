@@ -20,11 +20,15 @@ export class Player {
         // Physics Body - Larger size for better visibility
         const shape = new CANNON.Cylinder(0.8, 0.8, 3.5, 8);
 
+        // Create physics material for the player
+        const playerMaterial = new CANNON.Material('player');
+
         this.body = new CANNON.Body({
             mass: 70, // kg
             shape: shape,
             position: new CANNON.Vec3(position.x, position.y, position.z),
-            fixedRotation: true // Prevent tipping over
+            fixedRotation: true, // Prevent tipping over
+            material: playerMaterial
         });
         // Rotate cylinder to align with Y axis if needed. 
         // In Cannon-es, Cylinder is Z-aligned. We need to rotate it.
@@ -39,6 +43,11 @@ export class Player {
         this.maxCharge = 100;
         this.isCharging = false;
         this.chargeBar = document.getElementById('charge-bar');
+        // Animation
+        this.mixer = null;
+        this.actions = {};
+        this.activeAction = null;
+        this.lastAction = null;
     }
 
     loadModel() {
@@ -64,6 +73,10 @@ export class Player {
 
                 this.mesh.add(model);
                 console.log('Naruto model loaded successfully');
+
+                // Setup Animations
+                this.mixer = new THREE.AnimationMixer(model);
+                this.setupAnimations(gltf.animations);
             },
             (progress) => {
                 // Loading progress
@@ -120,6 +133,64 @@ export class Player {
         this.mesh.add(rightLeg);
     }
 
+    setupAnimations(animations) {
+        if (!animations || animations.length === 0) return;
+
+        // Log available animations to help debugging
+        console.log("Available animations:", animations.map(a => a.name));
+
+        // Helper to find animation by name (fuzzy match)
+        const findAnim = (name) => {
+            return animations.find(a => a.name.toLowerCase().includes(name.toLowerCase()));
+        };
+
+        // Map animations to actions
+        // Adjust these names based on actual model content
+        const idleAnim = findAnim('idle') || animations[0]; // Fallback to first anim
+        const runAnim = findAnim('run') || findAnim('walk') || animations[1] || animations[0];
+        const kickAnim = findAnim('attack') || findAnim('kick') || findAnim('punch') || animations[2] || animations[0];
+        const victoryAnim = findAnim('victory') || findAnim('celebrate') || findAnim('cheer') || findAnim('win') || animations[3] || animations[0];
+        const defeatAnim = findAnim('sad') || findAnim('defeat') || findAnim('lose') || findAnim('disappointed') || animations[4] || animations[0];
+
+        if (idleAnim) this.actions['Idle'] = this.mixer.clipAction(idleAnim);
+        if (runAnim) this.actions['Run'] = this.mixer.clipAction(runAnim);
+        if (kickAnim) {
+            this.actions['Kick'] = this.mixer.clipAction(kickAnim);
+            this.actions['Kick'].setLoop(THREE.LoopOnce);
+            this.actions['Kick'].clampWhenFinished = true;
+        }
+        if (victoryAnim) {
+            this.actions['Victory'] = this.mixer.clipAction(victoryAnim);
+            this.actions['Victory'].setLoop(THREE.LoopRepeat);
+        }
+        if (defeatAnim) {
+            this.actions['Defeat'] = this.mixer.clipAction(defeatAnim);
+            this.actions['Defeat'].setLoop(THREE.LoopRepeat);
+        }
+
+        console.log('Actions created:', Object.keys(this.actions));
+
+        // Start with Idle
+        if (this.actions['Idle']) {
+            this.activeAction = this.actions['Idle'];
+            this.activeAction.play();
+        }
+    }
+
+    fadeToAction(name, duration = 0.2) {
+        const nextAction = this.actions[name];
+        if (!nextAction || nextAction === this.activeAction) return;
+
+        // If kicking, don't interrupt unless it's finished or force? 
+        // For now simple crossfade
+
+        this.lastAction = this.activeAction;
+        this.activeAction = nextAction;
+
+        this.lastAction.fadeOut(duration);
+        this.activeAction.reset().fadeIn(duration).play();
+    }
+
     update(dt) {
         const input = this.game.inputManager.keys;
 
@@ -158,6 +229,30 @@ export class Player {
             this.chargeBar.style.width = `${this.charge}%`;
             this.chargeBar.style.backgroundColor = `rgb(${255}, ${255 - this.charge * 2.55}, 0)`; // Yellow to Red
         }
+
+        // Update Animation Mixer
+        if (this.mixer) {
+            this.mixer.update(dt);
+            this.updateAnimationState();
+        }
+    }
+
+    updateAnimationState() {
+        // Simple state machine: Kick > Run > Idle
+
+        // If kicking (playing Kick action and running), wait?
+        // Actually, let's just check if we are currently playing Kick and it's running
+        if (this.activeAction === this.actions['Kick'] && this.activeAction.isRunning()) {
+            return; // Don't interrupt kick
+        }
+
+        // Check movement
+        const speed = this.body.velocity.length();
+        if (speed > 1.0) {
+            this.fadeToAction('Run');
+        } else {
+            this.fadeToAction('Idle');
+        }
     }
 
     shoot() {
@@ -171,11 +266,23 @@ export class Player {
         const ballBody = this.game.ball.body;
         const dist = this.body.position.distanceTo(ballBody.position);
 
-        if (dist < 2.0) { // Kick distance
-            // Calculate direction: Player -> Ball
+        if (dist < 5.0) { // Kick distance
+            // Calculate direction
             const direction = new CANNON.Vec3();
-            ballBody.position.vsub(this.body.position, direction);
-            direction.y = 0; // Flatten
+
+            // If player is moving significantly, use movement direction
+            const playerVel = this.body.velocity;
+            const speed = Math.sqrt(playerVel.x * playerVel.x + playerVel.z * playerVel.z);
+
+            if (speed > 1.0) {
+                // Use movement direction
+                direction.set(playerVel.x, 0, playerVel.z);
+            } else {
+                // Stationary: Use direction from Player to Ball
+                ballBody.position.vsub(this.body.position, direction);
+                direction.y = 0; // Flatten
+            }
+
             direction.normalize();
 
             // Add some lift
@@ -190,6 +297,66 @@ export class Player {
             ballBody.applyImpulse(impulse, ballBody.position); // Apply at center
 
             console.log("Shot fired!", force);
+
+            // Play kick sound
+            if (this.game.audioManager) {
+                this.game.audioManager.playSFX('kick');
+            }
+
+            // Play Kick Animation
+            if (this.actions['Kick']) {
+                // Force play kick
+                const kick = this.actions['Kick'];
+                if (this.activeAction !== kick) {
+                    this.lastAction = this.activeAction;
+                    this.activeAction = kick;
+                    this.lastAction.fadeOut(0.1);
+                    this.activeAction.reset().fadeIn(0.1).play();
+                } else {
+                    // Replay if already kicking
+                    kick.reset().play();
+                }
+            }
+        }
+    }
+
+    playVictory() {
+        console.log('playVictory called, available actions:', Object.keys(this.actions));
+        if (this.actions['Victory']) {
+            if (this.activeAction) this.activeAction.stop();
+            this.activeAction = this.actions['Victory'];
+            this.activeAction.reset().play();
+            console.log('Playing victory animation');
+        } else {
+            console.log('No victory animation available, trying Kick as fallback');
+            // Fallback: Try to use Kick animation or any other animation
+            if (this.actions['Kick']) {
+                if (this.activeAction) this.activeAction.stop();
+                this.activeAction = this.actions['Kick'];
+                this.activeAction.reset().play();
+            } else if (this.actions['Run']) {
+                if (this.activeAction) this.activeAction.stop();
+                this.activeAction = this.actions['Run'];
+                this.activeAction.reset().play();
+            }
+        }
+    }
+
+    playDefeat() {
+        console.log('playDefeat called, available actions:', Object.keys(this.actions));
+        if (this.actions['Defeat']) {
+            if (this.activeAction) this.activeAction.stop();
+            this.activeAction = this.actions['Defeat'];
+            this.activeAction.reset().play();
+            console.log('Playing defeat animation');
+        } else {
+            console.log('No defeat animation available, using Idle as fallback');
+            // Fallback: Use Idle animation
+            if (this.actions['Idle']) {
+                if (this.activeAction) this.activeAction.stop();
+                this.activeAction = this.actions['Idle'];
+                this.activeAction.reset().play();
+            }
         }
     }
 }

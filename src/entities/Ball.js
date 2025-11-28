@@ -12,12 +12,17 @@ export class Ball {
 
         // Physics Body - slightly larger for better visibility
         const shape = new CANNON.Sphere(1);
+
+        // Create physics material for the ball
+        const ballMaterial = new CANNON.Material('ball');
+
         this.body = new CANNON.Body({
             mass: 0.45, // Standard football mass approx 0.45kg
             shape: shape,
             position: new CANNON.Vec3(position.x, position.y, position.z),
             linearDamping: 0.3, // Simulate air resistance / rolling friction
-            angularDamping: 0.3
+            angularDamping: 0.3,
+            material: ballMaterial
         });
         this.game.world.addBody(this.body);
     }
