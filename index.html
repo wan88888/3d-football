@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D Football Battle</title>
+</head>
+
+<body>
+  <div id="game-container"></div>
+  <div id="ui-layer">
+    <div id="hud-container">
+      <div id="level-info">Level: <span id="level">1</span></div>
+      <div id="time-info">Time: <span id="time">30</span>s</div>
+      <div id="target-info">Target: <span id="score">0</span>/<span id="target">3</span></div>
+    </div>
+    <div id="charge-container">
+      <div id="charge-bar"></div>
+    </div>
+    <div id="game-over-container" style="display: none;">
+      <h1 id="game-over-title">LEVEL FAILED</h1>
+      <p id="game-over-msg">Time's Up!</p>
+      <button id="btn-restart">Retry Level</button>
+    </div>
+  </div>
+  <script type="module" src="/main.js"></script>
+</body>
+
+</html>
